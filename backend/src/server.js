@@ -131,62 +131,208 @@ class InMemoryDb {
 }
 
 // ---------- SQLite / Fallback Setup ----------
-let db;
-if (process.env.VERCEL) {
-  console.log('ℹ️ Running on Vercel. Initializing in-memory database fallback.');
-  db = new InMemoryDb();
+// ---------- Database Adapters & Setup ----------
+let dbType = 'sqlite';
+let sqliteDb;
+let pgPool;
+let inMemoryDbInstance;
+
+if (process.env.POSTGRES_URL || process.env.DATABASE_URL) {
+  dbType = 'postgres';
+  console.log('ℹ️ PostgreSQL database configuration detected.');
+} else if (process.env.VERCEL) {
+  dbType = 'memory';
+  console.log('ℹ️ Running on Vercel (no Postgres configuration). Using in-memory fallback.');
 } else {
+  dbType = 'sqlite';
+}
+
+// Initialize underlying drivers dynamically to prevent load errors on Vercel
+if (dbType === 'postgres') {
   try {
-    const Database = (await import('better-sqlite3')).default;
-    db = new Database(process.env.DB_PATH || './data.db');
+    const pg = (await import('pg')).default;
+    const { Pool } = pg;
+    pgPool = new Pool({
+      connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
+      ssl: {
+        rejectUnauthorized: false
+      }
+    });
   } catch (err) {
-    console.error('⚠️ Failed to load better-sqlite3, falling back to in-memory database:', err.message);
-    db = new InMemoryDb();
+    console.error('❌ Failed to initialize Vercel Postgres pool, falling back to memory:', err.message);
+    dbType = 'memory';
+    inMemoryDbInstance = new InMemoryDb();
   }
 }
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS admins (
-  id TEXT PRIMARY KEY,
-  username TEXT UNIQUE NOT NULL,
-  password TEXT NOT NULL,
-  email TEXT NOT NULL
-);
+if (dbType === 'sqlite') {
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    sqliteDb = new Database(process.env.DB_PATH || './data.db');
+  } catch (err) {
+    console.error('⚠️ Failed to load better-sqlite3, falling back to in-memory database:', err.message);
+    dbType = 'memory';
+    inMemoryDbInstance = new InMemoryDb();
+  }
+}
 
-CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
-  donorName TEXT NOT NULL,
-  donorEmail TEXT NOT NULL,
-  type TEXT NOT NULL,
-  location TEXT,
-  amount REAL NOT NULL,
-  currency TEXT,
-  description TEXT,
-  customInfo TEXT,
-  startDate TEXT,
-  status TEXT NOT NULL,
-  createdAt TEXT NOT NULL
-);
+if (dbType === 'memory' && !inMemoryDbInstance) {
+  inMemoryDbInstance = new InMemoryDb();
+}
 
-CREATE TABLE IF NOT EXISTS updates (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  projectId TEXT NOT NULL,
-  date TEXT NOT NULL,
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  images TEXT, -- JSON string of [{url, caption}]
-  FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE
-);
-`);
+// Converts standard ? placeholders in SQLite to $1, $2 for Postgres
+function convertSql(sql) {
+  let index = 1;
+  return sql.replace(/\?/g, () => `$${index++}`);
+}
 
-// Ensure a default admin exists
+async function dbExec(sql) {
+  if (dbType === 'postgres') {
+    await pgPool.query(sql);
+  } else if (dbType === 'sqlite') {
+    sqliteDb.exec(sql);
+  } else {
+    inMemoryDbInstance.exec(sql);
+  }
+}
+
+async function dbGet(sql, params) {
+  if (dbType === 'postgres') {
+    const pgSql = convertSql(sql);
+    const res = await pgPool.query(pgSql, params);
+    const row = res.rows[0];
+    // pg driver returns count(*) as string, parse it to keep compatibility
+    if (row && row.cnt !== undefined) {
+      row.cnt = parseInt(row.cnt, 10);
+    }
+    return row;
+  } else if (dbType === 'sqlite') {
+    return sqliteDb.prepare(sql).get(...params);
+  } else {
+    return inMemoryDbInstance.prepare(sql).get(...params);
+  }
+}
+
+async function dbAll(sql, params) {
+  if (dbType === 'postgres') {
+    const pgSql = convertSql(sql);
+    const res = await pgPool.query(pgSql, params);
+    return res.rows;
+  } else if (dbType === 'sqlite') {
+    return sqliteDb.prepare(sql).all(...params);
+  } else {
+    return inMemoryDbInstance.prepare(sql).all(...params);
+  }
+}
+
+async function dbRun(sql, params) {
+  if (dbType === 'postgres') {
+    let pgSql = convertSql(sql);
+    // Append RETURNING id to auto-increment insert in Postgres
+    if (sql.trim().toLowerCase().startsWith('insert into updates')) {
+      pgSql += ' RETURNING id';
+      const res = await pgPool.query(pgSql, params);
+      return { lastInsertRowid: res.rows[0].id };
+    }
+    const res = await pgPool.query(pgSql, params);
+    return { lastInsertRowid: null, changes: res.rowCount };
+  } else if (dbType === 'sqlite') {
+    return sqliteDb.prepare(sql).run(...params);
+  } else {
+    return inMemoryDbInstance.prepare(sql).run(...params);
+  }
+}
+
+const db = {
+  prepare(sql) {
+    return {
+      get: async (...params) => await dbGet(sql, params),
+      all: async (...params) => await dbAll(sql, params),
+      run: async (...params) => await dbRun(sql, params)
+    };
+  },
+  exec: async (sql) => await dbExec(sql)
+};
+
+// Database Initialization & Seeding
 (async () => {
-  const adminExists = db.prepare('SELECT 1 FROM admins WHERE username = ?').get('admin');
-  if (!adminExists) {
-    const hashed = await bcryptjs.hash('admin123', 10);
-    db.prepare('INSERT INTO admins (id, username, password, email) VALUES (?, ?, ?, ?)')
-      .run(uuidv4(), 'admin', hashed, 'admin@ayoubwelfare.org');
-    console.log('✅ Default admin created (username=admin, password=admin123)');
+  try {
+    if (dbType === 'postgres') {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS admins (
+          id TEXT PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL,
+          email TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS projects (
+          id TEXT PRIMARY KEY,
+          donorName TEXT NOT NULL,
+          donorEmail TEXT NOT NULL,
+          type TEXT NOT NULL,
+          location TEXT,
+          amount REAL NOT NULL,
+          currency TEXT,
+          description TEXT,
+          customInfo TEXT,
+          startDate TEXT,
+          status TEXT NOT NULL,
+          createdAt TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS updates (
+          id SERIAL PRIMARY KEY,
+          projectId TEXT NOT NULL,
+          date TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          images TEXT,
+          FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE
+        );
+      `);
+    } else {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS admins (
+          id TEXT PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL,
+          email TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS projects (
+          id TEXT PRIMARY KEY,
+          donorName TEXT NOT NULL,
+          donorEmail TEXT NOT NULL,
+          type TEXT NOT NULL,
+          location TEXT,
+          amount REAL NOT NULL,
+          currency TEXT,
+          description TEXT,
+          customInfo TEXT,
+          startDate TEXT,
+          status TEXT NOT NULL,
+          createdAt TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS updates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          projectId TEXT NOT NULL,
+          date TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          images TEXT, -- JSON string of [{url, caption}]
+          FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE
+        );
+      `);
+    }
+
+    // Ensure a default admin exists
+    const adminExists = await db.prepare('SELECT 1 FROM admins WHERE username = ?').get('admin');
+    if (!adminExists) {
+      const hashed = await bcryptjs.hash('admin123', 10);
+      await db.prepare('INSERT INTO admins (id, username, password, email) VALUES (?, ?, ?, ?)')
+        .run(uuidv4(), 'admin', hashed, 'admin@ayoubwelfare.org');
+      console.log('✅ Default admin created (username=admin, password=admin123)');
+    }
+  } catch (err) {
+    console.error('❌ Database setup / seeding failed:', err.message);
   }
 })();
 
@@ -229,18 +375,18 @@ function verifyToken(token) {
   }
 }
 
-function getProjectWithUpdates(projectId) {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+async function getProjectWithUpdates(projectId) {
+  const project = await db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
   if (!project) return null;
-  // parse JSON fields
-  project.customInfo = project.customInfo ? JSON.parse(project.customInfo) : {};
-  const updates = db.prepare('SELECT * FROM updates WHERE projectId = ? ORDER BY id').all(projectId);
+  // parse JSON fields safely (Postgres might pre-parse JSON, or return it as string)
+  project.customInfo = typeof project.customInfo === 'string' ? JSON.parse(project.customInfo) : (project.customInfo || {});
+  const updates = await db.prepare('SELECT * FROM updates WHERE projectId = ? ORDER BY id').all(projectId);
   project.updates = updates.map(u => ({
     id: u.id,
     date: u.date,
     title: u.title,
     body: u.body,
-    images: u.images ? JSON.parse(u.images) : []
+    images: u.images ? (typeof u.images === 'string' ? JSON.parse(u.images) : u.images) : []
   }));
   return project;
 }
@@ -274,7 +420,7 @@ app.post('/api/auth/login', async (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
   }
-  const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+  const admin = await db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
   if (!admin) return res.status(401).json({ error: 'Invalid credentials' });
   const valid = await bcryptjs.compare(password, admin.password);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
@@ -294,7 +440,8 @@ app.post('/api/projects', async (req, res) => {
     const now = new Date();
     const startDate = now.toISOString().slice(0, 10);
     const createdAt = now.toISOString();
-    db.prepare(`INSERT INTO projects (id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt)
+    
+    await db.prepare(`INSERT INTO projects (id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         projectId,
@@ -311,7 +458,7 @@ app.post('/api/projects', async (req, res) => {
         createdAt
       );
     // Initial update entry
-    db.prepare(`INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)`)
+    await db.prepare(`INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)`)
       .run(projectId, startDate, 'Project Initiated', 'Your donation has been received and we are planning the implementation. You will receive updates as work progresses.', JSON.stringify([]));
 
     const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${projectId}`;
@@ -327,7 +474,7 @@ app.post('/api/projects', async (req, res) => {
 </div>`;
     await sendEmail(donorEmail, `Project Created - Reference: ${projectId}`, emailHtml);
 
-    const createdProject = getProjectWithUpdates(projectId);
+    const createdProject = await getProjectWithUpdates(projectId);
     res.status(201).json(createdProject);
   } catch (err) {
     console.error('Error creating project:', err);
@@ -335,47 +482,59 @@ app.post('/api/projects', async (req, res) => {
   }
 });
 
-app.get('/api/projects', (req, res) => {
-  const rows = db.prepare('SELECT * FROM projects').all();
-  const projects = rows.map(p => {
-    const proj = { ...p, customInfo: p.customInfo ? JSON.parse(p.customInfo) : {} };
-    proj.updates = db.prepare('SELECT * FROM updates WHERE projectId = ? ORDER BY id').all(p.id).map(u => ({
-      id: u.id,
-      date: u.date,
-      title: u.title,
-      body: u.body,
-      images: u.images ? JSON.parse(u.images) : []
+app.get('/api/projects', async (req, res) => {
+  try {
+    const rows = await db.prepare('SELECT * FROM projects').all();
+    const projects = await Promise.all(rows.map(async p => {
+      const proj = { ...p, customInfo: p.customInfo ? (typeof p.customInfo === 'string' ? JSON.parse(p.customInfo) : p.customInfo) : {} };
+      const updates = await db.prepare('SELECT * FROM updates WHERE projectId = ? ORDER BY id').all(p.id);
+      proj.updates = updates.map(u => ({
+        id: u.id,
+        date: u.date,
+        title: u.title,
+        body: u.body,
+        images: u.images ? (typeof u.images === 'string' ? JSON.parse(u.images) : u.images) : []
+      }));
+      return proj;
     }));
-    return proj;
-  });
-  res.json(projects);
+    res.json(projects);
+  } catch (err) {
+    console.error('Error fetching projects:', err);
+    res.status(500).json({ error: 'Failed to fetch projects' });
+  }
 });
 
-app.get('/api/projects/:id', (req, res) => {
-  const project = getProjectWithUpdates(req.params.id);
-  if (!project) return res.status(404).json({ error: 'Project not found' });
-  res.json(project);
+app.get('/api/projects/:id', async (req, res) => {
+  try {
+    const project = await getProjectWithUpdates(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    res.json(project);
+  } catch (err) {
+    console.error('Error fetching project:', err);
+    res.status(500).json({ error: 'Failed to fetch project' });
+  }
 });
 
-app.post('/api/projects/:id/updates', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+app.post('/api/projects/:id/updates', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
 
-  const { title, body, images, imageUrl, imageCaption } = req.body;
-  const proj = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!proj) return res.status(404).json({ error: 'Project not found' });
-  if (!title || !body) return res.status(400).json({ error: 'Title and body required' });
+    const { title, body, images, imageUrl, imageCaption } = req.body;
+    const proj = await db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!proj) return res.status(404).json({ error: 'Project not found' });
+    if (!title || !body) return res.status(400).json({ error: 'Title and body required' });
 
-  const imgArray = images || (imageUrl ? [{ url: imageUrl, caption: imageCaption || 'Project photo' }] : []);
-  const info = db.prepare('INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)')
-    .run(req.params.id, new Date().toISOString().slice(0, 10), title, body, JSON.stringify(imgArray));
-  const newUpdate = { id: info.lastInsertRowid, date: new Date().toISOString().slice(0, 10), title, body, images: imgArray };
+    const imgArray = images || (imageUrl ? [{ url: imageUrl, caption: imageCaption || 'Project photo' }] : []);
+    const info = await db.prepare('INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)')
+      .run(req.params.id, new Date().toISOString().slice(0, 10), title, body, JSON.stringify(imgArray));
+    const newUpdate = { id: info.lastInsertRowid, date: new Date().toISOString().slice(0, 10), title, body, images: imgArray };
 
-  // Email to donor
-  const donorEmail = proj.donorEmail;
-  const donorName = proj.donorName;
-  const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${proj.id}`;
-  const emailHtml = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+    // Email to donor
+    const donorEmail = proj.donorEmail;
+    const donorName = proj.donorName;
+    const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${proj.id}`;
+    const emailHtml = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
 <h2 style="color: #16a34a;">📢 Project Update - ${proj.id}</h2>
 <p>Dear ${donorName},</p>
 <p>There's a new update on your project:</p>
@@ -383,61 +542,79 @@ app.post('/api/projects/:id/updates', (req, res) => {
 <p>${body}</p>
 <p style="margin-top: 20px;"><a href="${trackingLink}" style="display: inline-block; background-color: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">View Full Update</a></p>
 </div>`;
-  sendEmail(donorEmail, `Update: ${title}`, emailHtml);
+    sendEmail(donorEmail, `Update: ${title}`, emailHtml);
 
-  res.json(newUpdate);
+    res.json(newUpdate);
+  } catch (err) {
+    console.error('Error adding project update:', err);
+    res.status(500).json({ error: 'Failed to add update' });
+  }
 });
 
-app.patch('/api/projects/:id/status', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
-  const { status } = req.body;
-  if (!['pending', 'in_progress', 'completed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+app.patch('/api/projects/:id/status', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+    const { status } = req.body;
+    if (!['pending', 'in_progress', 'completed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  const proj = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!proj) return res.status(404).json({ error: 'Project not found' });
-  const oldStatus = proj.status;
-  db.prepare('UPDATE projects SET status = ? WHERE id = ?').run(status, req.params.id);
+    const proj = await db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!proj) return res.status(404).json({ error: 'Project not found' });
+    const oldStatus = proj.status;
+    await db.prepare('UPDATE projects SET status = ? WHERE id = ?').run(status, req.params.id);
 
-  let subject = '';
-  let message = '';
-  if (status === 'in_progress') {
-    subject = `We've started working on your project! - ${proj.id}`;
-    message = `Great news! We have started working on your ${proj.type} project. You will receive regular updates as we progress.`;
-  } else if (status === 'completed') {
-    subject = `Your project is complete! - ${proj.id}`;
-    message = `Excellent news! Your ${proj.type} project has been successfully completed and is now serving the community.`;
-  }
-  if (subject && message) {
-    const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${proj.id}`;
-    const emailHtml = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+    let subject = '';
+    let message = '';
+    if (status === 'in_progress') {
+      subject = `We've started working on your project! - ${proj.id}`;
+      message = `Great news! We have started working on your ${proj.type} project. You will receive regular updates as we progress.`;
+    } else if (status === 'completed') {
+      subject = `Your project is complete! - ${proj.id}`;
+      message = `Excellent news! Your ${proj.type} project has been successfully completed and is now serving the community.`;
+    }
+    if (subject && message) {
+      const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${proj.id}`;
+      const emailHtml = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
 <h2 style="color: #16a34a;">✅ Project Status Update</h2>
 <p>Dear ${proj.donorName},</p>
 <p>${message}</p>
 <p style="margin-top: 20px;"><a href="${trackingLink}" style="display: inline-block; background-color: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">View Project</a></p>
 </div>`;
-    sendEmail(proj.donorEmail, subject, emailHtml);
+      sendEmail(proj.donorEmail, subject, emailHtml);
+    }
+
+    const updatedProject = await getProjectWithUpdates(req.params.id);
+    res.json({ ...updatedProject, message: `Status updated from ${oldStatus} to ${status}` });
+  } catch (err) {
+    console.error('Error updating project status:', err);
+    res.status(500).json({ error: 'Failed to update status' });
   }
-
-  const updatedProject = getProjectWithUpdates(req.params.id);
-  res.json({ ...updatedProject, message: `Status updated from ${oldStatus} to ${status}` });
 });
 
-app.delete('/api/projects/:id', (req, res) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
 
-  const proj = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-  if (!proj) return res.status(404).json({ error: 'Project not found' });
+    const proj = await db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!proj) return res.status(404).json({ error: 'Project not found' });
 
-  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
-  res.json({ message: 'Project successfully deleted', id: req.params.id });
+    await db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+    res.json({ message: 'Project successfully deleted', id: req.params.id });
+  } catch (err) {
+    console.error('Error deleting project:', err);
+    res.status(500).json({ error: 'Failed to delete project' });
+  }
 });
 
-
-app.get('/api/health', (req, res) => {
-  const count = db.prepare('SELECT COUNT(*) AS cnt FROM projects').get().cnt;
-  res.json({ status: 'ok', projects: count });
+app.get('/api/health', async (req, res) => {
+  try {
+    const row = await db.prepare('SELECT COUNT(*) AS cnt FROM projects').get();
+    res.json({ status: 'ok', projects: row.cnt });
+  } catch (err) {
+    console.error('Health check failed:', err);
+    res.status(500).json({ status: 'error', error: err.message });
+  }
 });
 
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
