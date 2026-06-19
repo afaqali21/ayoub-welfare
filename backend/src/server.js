@@ -25,6 +25,19 @@ class InMemoryDb {
     this.projects = [];
     this.updates = [];
     this.updateIdCounter = 1;
+
+    // Seed default admin synchronously to prevent race conditions during serverless startup
+    try {
+      const hashed = bcryptjs.hashSync('admin123', 10);
+      this.admins.push({
+        id: 'admin-id-default',
+        username: 'admin',
+        password: hashed,
+        email: 'admin@ayoubwelfare.org'
+      });
+    } catch (e) {
+      console.error('Failed to seed default admin in memory:', e);
+    }
   }
 
   exec(sql) {
