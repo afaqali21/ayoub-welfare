@@ -5,7 +5,6 @@ import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
 import jwt from 'jsonwebtoken';
 import bcryptjs from 'bcryptjs';
-import Database from 'better-sqlite3';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -19,8 +18,119 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// ---------- SQLite Setup ----------
-const db = new Database(process.env.DB_PATH || './data.db');
+// ---------- In-Memory Database Fallback for Vercel ----------
+class InMemoryDb {
+  constructor() {
+    this.admins = [];
+    this.projects = [];
+    this.updates = [];
+    this.updateIdCounter = 1;
+  }
+
+  exec(sql) {
+    // No-op for creating tables in memory
+  }
+
+  prepare(sql) {
+    const normalizedSql = sql.trim().replace(/\s+/g, ' ');
+
+    return {
+      get: (...args) => {
+        // SELECT 1 FROM admins WHERE username = ?
+        if (normalizedSql.includes('SELECT 1 FROM admins WHERE username = ?')) {
+          const username = args[0];
+          const exists = this.admins.some(a => a.username === username);
+          return exists ? { 1: 1 } : undefined;
+        }
+        // SELECT * FROM admins WHERE username = ?
+        if (normalizedSql.includes('SELECT * FROM admins WHERE username = ?')) {
+          const username = args[0];
+          return this.admins.find(a => a.username === username);
+        }
+        // SELECT * FROM projects WHERE id = ?
+        if (normalizedSql.includes('SELECT * FROM projects WHERE id = ?')) {
+          const id = args[0];
+          return this.projects.find(p => p.id === id);
+        }
+        // SELECT COUNT(*) AS cnt FROM projects
+        if (normalizedSql.includes('SELECT COUNT(*) AS cnt FROM projects')) {
+          return { cnt: this.projects.length };
+        }
+        console.warn('Unhandled GET SQL:', sql, args);
+        return undefined;
+      },
+
+      all: (...args) => {
+        // SELECT * FROM updates WHERE projectId = ? ORDER BY id
+        if (normalizedSql.includes('SELECT * FROM updates WHERE projectId = ? ORDER BY id')) {
+          const projectId = args[0];
+          return this.updates.filter(u => u.projectId === projectId).sort((a, b) => a.id - b.id);
+        }
+        // SELECT * FROM projects
+        if (normalizedSql.includes('SELECT * FROM projects')) {
+          return this.projects;
+        }
+        console.warn('Unhandled ALL SQL:', sql, args);
+        return [];
+      },
+
+      run: (...args) => {
+        // INSERT INTO admins (id, username, password, email) VALUES (?, ?, ?, ?)
+        if (normalizedSql.includes('INSERT INTO admins')) {
+          const [id, username, password, email] = args;
+          this.admins.push({ id, username, password, email });
+          return { lastInsertRowid: this.admins.length };
+        }
+        // INSERT INTO projects (id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt)
+        if (normalizedSql.includes('INSERT INTO projects')) {
+          const [id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt] = args;
+          this.projects.push({ id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt });
+          return { lastInsertRowid: id };
+        }
+        // INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)
+        if (normalizedSql.includes('INSERT INTO updates')) {
+          const [projectId, date, title, body, images] = args;
+          const newId = this.updateIdCounter++;
+          this.updates.push({ id: newId, projectId, date, title, body, images });
+          return { lastInsertRowid: newId };
+        }
+        // UPDATE projects SET status = ? WHERE id = ?
+        if (normalizedSql.includes('UPDATE projects SET status = ? WHERE id = ?')) {
+          const [status, id] = args;
+          const project = this.projects.find(p => p.id === id);
+          if (project) {
+            project.status = status;
+          }
+          return { changes: 1 };
+        }
+        // DELETE FROM projects WHERE id = ?
+        if (normalizedSql.includes('DELETE FROM projects WHERE id = ?')) {
+          const id = args[0];
+          this.projects = this.projects.filter(p => p.id !== id);
+          this.updates = this.updates.filter(u => u.projectId !== id);
+          return { changes: 1 };
+        }
+        console.warn('Unhandled RUN SQL:', sql, args);
+        return { lastInsertRowid: 0, changes: 0 };
+      }
+    };
+  }
+}
+
+// ---------- SQLite / Fallback Setup ----------
+let db;
+if (process.env.VERCEL) {
+  console.log('ℹ️ Running on Vercel. Initializing in-memory database fallback.');
+  db = new InMemoryDb();
+} else {
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    db = new Database(process.env.DB_PATH || './data.db');
+  } catch (err) {
+    console.error('⚠️ Failed to load better-sqlite3, falling back to in-memory database:', err.message);
+    db = new InMemoryDb();
+  }
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS admins (
@@ -68,16 +178,18 @@ CREATE TABLE IF NOT EXISTS updates (
 })();
 
 // ---------- Multer Setup ----------
-const uploadDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+const uploadDir = process.env.VERCEL ? '/tmp/uploads' : path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
+  destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
 const upload = multer({ storage });
 
-app.use('/uploads', express.static('uploads'));
+app.use('/uploads', express.static(uploadDir));
 
 app.post('/api/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
