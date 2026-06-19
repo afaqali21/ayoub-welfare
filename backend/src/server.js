@@ -12,7 +12,7 @@ import fs from 'fs';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Middleware
 app.use(cors());
@@ -563,7 +563,7 @@ app.post('/api/projects/:id/updates', async (req, res) => {
 <p>${body}</p>
 <p style="margin-top: 20px;"><a href="${trackingLink}" style="display: inline-block; background-color: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">View Full Update</a></p>
 </div>`;
-    sendEmail(donorEmail, `Update: ${title}`, emailHtml);
+    await sendEmail(donorEmail, `Update: ${title}`, emailHtml);
 
     res.json(newUpdate);
   } catch (err) {
@@ -601,7 +601,7 @@ app.patch('/api/projects/:id/status', async (req, res) => {
 <p>${message}</p>
 <p style="margin-top: 20px;"><a href="${trackingLink}" style="display: inline-block; background-color: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">View Project</a></p>
 </div>`;
-      sendEmail(proj.donorEmail, subject, emailHtml);
+      await sendEmail(proj.donorEmail, subject, emailHtml);
     }
 
     const updatedProject = await getProjectWithUpdates(req.params.id);
