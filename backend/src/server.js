@@ -180,6 +180,23 @@ if (dbType === 'memory' && !inMemoryDbInstance) {
   inMemoryDbInstance = new InMemoryDb();
 }
 
+// Normalizes lowercase keys returned by PostgreSQL to camelCase fields expected by frontend/backend
+function normalizeKeys(row) {
+  if (!row) return row;
+  const mapped = {};
+  for (const key of Object.keys(row)) {
+    let newKey = key;
+    if (key === 'donorname') newKey = 'donorName';
+    else if (key === 'donoremail') newKey = 'donorEmail';
+    else if (key === 'custominfo') newKey = 'customInfo';
+    else if (key === 'startdate') newKey = 'startDate';
+    else if (key === 'createdat') newKey = 'createdAt';
+    else if (key === 'projectid') newKey = 'projectId';
+    mapped[newKey] = row[key];
+  }
+  return mapped;
+}
+
 // Converts standard ? placeholders in SQLite to $1, $2 for Postgres
 function convertSql(sql) {
   let index = 1;
@@ -201,9 +218,13 @@ async function dbGet(sql, params) {
     const pgSql = convertSql(sql);
     const res = await pgPool.query(pgSql, params);
     const row = res.rows[0];
-    // pg driver returns count(*) as string, parse it to keep compatibility
-    if (row && row.cnt !== undefined) {
-      row.cnt = parseInt(row.cnt, 10);
+    if (row) {
+      const normalized = normalizeKeys(row);
+      // pg driver returns count(*) as string, parse it to keep compatibility
+      if (normalized.cnt !== undefined) {
+        normalized.cnt = parseInt(normalized.cnt, 10);
+      }
+      return normalized;
     }
     return row;
   } else if (dbType === 'sqlite') {
@@ -217,7 +238,7 @@ async function dbAll(sql, params) {
   if (dbType === 'postgres') {
     const pgSql = convertSql(sql);
     const res = await pgPool.query(pgSql, params);
-    return res.rows;
+    return res.rows.map(normalizeKeys);
   } else if (dbType === 'sqlite') {
     return sqliteDb.prepare(sql).all(...params);
   } else {
