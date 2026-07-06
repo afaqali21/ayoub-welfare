@@ -1,30 +1,33 @@
 import { useState } from "react";
 import { Helmet } from "react-helmet-async";
-import { Droplets, UtensilsCrossed, Stethoscope, GraduationCap, Heart, Loader } from "lucide-react";
+import { Droplets, UtensilsCrossed, Stethoscope, Accessibility, Loader, House } from "lucide-react";
 import { PageHero } from "@/components/page-hero";
 import { ApiService } from "@/lib/api-service";
 
 const causes = [
   { id: "water", icon: Droplets, label: "Clean Water" },
-  { id: "food", icon: UtensilsCrossed, label: "Food Pack" },
-  { id: "medical", icon: Stethoscope, label: "Medical Aid" },
-  { id: "education", icon: GraduationCap, label: "Education" },
-  { id: "general", icon: Heart, label: "Where Most Needed" },
+  { id: "food", icon: UtensilsCrossed, label: "Food Parcel" },
+  { id: "medical", icon: Stethoscope, label: "aqeeqa bakra" },
+  { id: "brighter-homes", icon: House, label: "Ayoub Brighter Homes" },
+  { id: "general", icon: Accessibility, label: "Wheel Chair" },
 ];
 
-const amounts = [25, 50, 100, 250];
+// const amounts = [25, 50, 100, 250]; // Amount selection removed
 
 const causeDescriptions: Record<string, string> = {
   water: "Solar-powered water pumps providing clean water to rural communities",
-  food: "Food packages for vulnerable families during emergencies",
-  medical: "Free medical camps and health awareness programs",
-  education: "School supplies and educational resources for children",
+  food: "Food parcels for families in need",
+  medical: "Aqeeqa Bakra (livestock) support for communities",
+  "brighter-homes": "Ayoub Brighter Homes project provides 2 solar panels, 4 light bulbs, and one stand fan to families",
   general: "Direct support to communities most in need",
 };
 
 export default function Donate() {
   const [cause, setCause] = useState("water");
-  const [amount, setAmount] = useState(50);
+  const [selectedOption, setSelectedOption] = useState(""); // e.g., 'small-hand-pump'
+  const [selectedPrice, setSelectedPrice] = useState(0);
+  // Amount state kept for compatibility but not displayed
+  const [amount, setAmount] = useState(0);
   const [custom, setCustom] = useState("");
   const [step, setStep] = useState("amount"); // "amount" | "donor-info" | "success"
   const [donorName, setDonorName] = useState("");
@@ -34,39 +37,38 @@ export default function Donate() {
   const [successData, setSuccessData] = useState<any>(null);
 
   const handleProceed = async () => {
+    // Validate input fields
     if (!donorName.trim() || !donorEmail.trim()) {
-      setError("Please fill in all fields");
+      setError('Please fill in all fields');
       return;
     }
-    if (!donorEmail.includes("@")) {
-      setError("Please enter a valid email address");
+    if (!donorEmail.includes('@')) {
+      setError('Please enter a valid email address');
       return;
     }
 
-    setIsLoading(true);
-    setError("");
+    // Calculate donation amount
+    const amountValue = selectedPrice || parseFloat(custom || amount.toString());
 
-    try {
-      // Create project in backend
-      const causeLabel = causes.find((c) => c.id === cause)?.label || cause;
-      const projectData = {
-        donorName,
-        donorEmail,
-        type: causeLabel,
-        amount: parseFloat(custom || amount.toString()),
-        currency: "GBP",
-        description: causeDescriptions[cause],
-        location: "To be determined",
-      };
+    // Build SumUp payment URL with query parameters
+    const sumupUrl = `https://pay.sumup.com/b2c/QR0QLE0Y?amount=${amountValue}&email=${encodeURIComponent(donorEmail)}&name=${encodeURIComponent(donorName)}`;
 
-      const project = await ApiService.createProject(projectData);
-      setSuccessData(project);
-      setStep("success");
-    } catch (err: any) {
-      setError(err.message || "Failed to process donation");
-    } finally {
-      setIsLoading(false);
-    }
+    // Open SumUp payment page in a new tab
+    window.open(sumupUrl, '_blank');
+
+    // Optimistically set success data with a tracking ID placeholder
+    const causeLabel = causes.find((c) => c.id === cause)?.label || cause;
+    setSuccessData({
+      id: 'TRACKING-' + Math.random().toString(36).substr(2, 9).toUpperCase(),
+      donorName,
+      donorEmail,
+      type: causeLabel,
+      amount: amountValue,
+      currency: 'GBP',
+      description: causeDescriptions[cause],
+      location: 'To be determined',
+    });
+    setStep('success');
   };
 
   const finalAmount = custom || amount;
@@ -93,22 +95,68 @@ export default function Donate() {
                   </button>
                 ))}
               </div>
-              <h2 className="mt-10 font-display text-2xl font-semibold">Choose an amount</h2>
-              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {amounts.map((a) => (
-                  <button key={a} onClick={() => { setAmount(a); setCustom(""); }} className={`rounded-xl border p-4 text-lg font-semibold transition-all ${amount === a && !custom ? "border-accent bg-accent text-accent-foreground" : "border-border hover:border-accent"}`}>£{a}</button>
-                ))}
-              </div>
-              <div className="mt-4">
-                <label className="text-sm font-medium text-muted-foreground">Or enter your own amount</label>
-                <div className="mt-2 flex items-center rounded-xl border border-border bg-background px-4 focus-within:border-primary">
-                  <span className="text-lg font-semibold text-muted-foreground">£</span>
-                  <input type="number" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="0" className="w-full bg-transparent px-3 py-3 text-lg outline-none" />
+              {/* Water project specific options */}
+              {cause === "water" && (
+                <div className="mt-8">
+                  <h2 className="font-display text-2xl font-semibold mb-4">Select a Pump</h2>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <button
+                      className={`rounded-xl border p-4 text-center transition-all ${selectedOption === "small-hand-pump" ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary"}`}
+                      onClick={() => { setSelectedOption("small-hand-pump"); setSelectedPrice(85); setAmount(85); }}
+                    >
+                      Small Hand Pump – £85
+                    </button>
+                    <button
+                      className={`rounded-xl border p-4 text-center transition-all ${selectedOption === "large-hand-pump" ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary"}`}
+                      onClick={() => { setSelectedOption("large-hand-pump"); setSelectedPrice(195); setAmount(195); }}
+                    >
+                      Large Hand Pump – £195
+                    </button>
+                    <button
+                      className={`rounded-xl border p-4 text-center transition-all ${selectedOption === "small-solar-pump" ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary"}`}
+                      onClick={() => { setSelectedOption("small-solar-pump"); setSelectedPrice(525); setAmount(525); }}
+                    >
+                      Small Solar Pump – £525
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setStep("donor-info")}
+                    disabled={!selectedOption}
+                    className="mt-6 w-full rounded-full bg-btn-donate px-8 py-4 text-base font-semibold text-white shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50"
+                  >
+                    Continue: £{selectedPrice}
+                  </button>
                 </div>
-              </div>
-              <button onClick={() => setStep("donor-info")} className="mt-10 w-full rounded-full bg-btn-donate px-8 py-4 text-base font-semibold text-white shadow-lg transition-transform hover:-translate-y-0.5">
-                Continue: £{finalAmount}
-              </button>
+              )}
+              {/* For other causes, skip amount selection */}
+              {cause !== "water" && (
+                <div className="mt-4">
+                  {/* Show price for selected cause */}
+                  <p className="mb-2 text-lg font-medium">
+                    {cause === "general" && "Wheel Chair – £60"}
+                    {cause === "food" && "Food Parcel – £15"}
+                    {cause === "medical" && "Aqeeqa Bakra – £90"}
+                    {cause === "brighter-homes" && "Ayoub Brighter Homes – £150"}
+                  </p>
+                  <button
+                    onClick={() => {
+                      let price = 0;
+                      if (cause === "general") price = 60;
+                      else if (cause === "food") price = 15;
+                       else if (cause === "medical") price = 90;
+                       else if (cause === "brighter-homes") price = 150;
+                      else if (cause === "medical") price = 90;
+                      setSelectedOption(cause);
+                      setSelectedPrice(price);
+                      setAmount(price);
+                      setStep("donor-info");
+                    }}
+                    className="w-full rounded-full bg-btn-donate px-8 py-4 text-base font-semibold text-white shadow-lg transition-transform hover:-translate-y-0.5"
+                  >
+                    Continue: £{cause === "general" ? 60 : cause === "food" ? 15 : cause === "medical" ? 90 : cause === "brighter-homes" ? 150 : ''}
+                  </button>
+                </div>
+              )}
             </>
           )}
 
