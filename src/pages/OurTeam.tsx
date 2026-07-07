@@ -12,7 +12,7 @@ export default function OurTeam() {
       <Helmet>
         <title>Our Team — Ayoub Welfare CIC</title>
         <meta name="description" content="Meet Khurram and Naila — the co-founders and directors of Ayoub Welfare CIC." />
-        <link rel="canonical" href="https://ayoub-legacy-aid.lovable.app/our-team" />
+        <link rel="canonical" href="https://ayoubwelfare.org/our-team" />
       </Helmet>
       <PageHero eyebrow="Our Team" title="Family-led. Community-driven." description="Ayoub Welfare CIC is a family-run organisation led by two dedicated Co-Founders & Directors who share a strong commitment to serving underserved communities." />
       <section className="mx-auto max-w-6xl px-6 py-20">

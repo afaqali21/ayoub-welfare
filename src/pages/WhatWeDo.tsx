@@ -20,7 +20,7 @@ export default function WhatWeDo() {
       <Helmet>
         <title>What We Do — Ayoub Welfare CIC</title>
         <meta name="description" content="Clean water, food, medical and education programmes delivered directly to underserved communities in Pakistan." />
-        <link rel="canonical" href="https://ayoub-legacy-aid.lovable.app/what-we-do" />
+        <link rel="canonical" href="https://ayoubwelfare.org/what-we-do" />
       </Helmet>
       <PageHero eyebrow="Our Programmes" title="What we do." description="From clean water and food to medical and education support, every programme is designed to deliver lasting change — directly, transparently, and with dignity." />
       <section className="mx-auto max-w-7xl space-y-24 px-6 py-24">

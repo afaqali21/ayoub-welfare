@@ -35,7 +35,7 @@ export default function Home() {
       <Helmet>
         <title>Ayoub Welfare CIC — Serving Communities, Strengthening Lives</title>
         <meta name="description" content="100% donation-based, UK-registered CIC delivering clean water, food, medical and education aid to underserved communities in Pakistan." />
-        <link rel="canonical" href="https://ayoub-legacy-aid.lovable.app/" />
+        <link rel="canonical" href="https://ayoubwelfare.org" />
       </Helmet>
       <section className="relative isolate overflow-hidden">
         <img src={heroImg} alt="Children gathered around a newly installed water pump in a Pakistani village" width={1080} height={1920} className="absolute inset-0 h-full w-full object-cover object-center" />

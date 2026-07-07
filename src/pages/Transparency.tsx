@@ -15,7 +15,7 @@ export default function Transparency() {
       <Helmet>
         <title>Transparency & Accountability — Ayoub Welfare CIC</title>
         <meta name="description" content="Photos, videos, GPS locations, and audited funds — every donation is documented and accounted for." />
-        <link rel="canonical" href="https://ayoub-legacy-aid.lovable.app/transparency" />
+        <link rel="canonical" href="https://ayoubwelfare.org/transparency" />
       </Helmet>
       <PageHero eyebrow="Transparency" title="Trust, earned through proof." description="We believe trust is earned through transparency. Every project we deliver is fully documented to provide clear evidence of distribution and impact." />
       <section className="mx-auto max-w-7xl px-6 py-20">

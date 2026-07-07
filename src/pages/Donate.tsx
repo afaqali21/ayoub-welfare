@@ -22,6 +22,20 @@ const causeDescriptions: Record<string, string> = {
   general: "Direct support to communities most in need",
 };
 
+// Mapping option/cause IDs to their specific SumUp payment links
+const sumupLinks: Record<string, string> = {
+  "small-hand-pump": "https://pay.sumup.com/b2c/Q3SFB3ER",
+  // You can add more mapping here in the future, for example:
+  "large-hand-pump": "https://pay.sumup.com/b2c/QH9MS7BW",
+  "small-solar-pump": "https://pay.sumup.com/b2c/QZZ4HOXY",
+   "food": "https://pay.sumup.com/b2c/QHZX6IB5",
+   "Aqeeqa Bakra":"https://pay.sumup.com/b2c/QHZWXAVK",
+   "Ayoub Brighter Homes": "https://pay.sumup.com/b2c/QMDA7E56",
+   "Wheel Chair": "https://pay.sumup.com/b2c/QQ48WBHK",
+};
+
+const DEFAULT_SUMUP_LINK = "https://pay.sumup.com/b2c/QR0QLE0Y";
+
 export default function Donate() {
   const [cause, setCause] = useState("water");
   const [selectedOption, setSelectedOption] = useState(""); // e.g., 'small-hand-pump'
@@ -50,8 +64,9 @@ export default function Donate() {
     // Calculate donation amount
     const amountValue = selectedPrice || parseFloat(custom || amount.toString());
 
-    // Build SumUp payment URL with query parameters
-    const sumupUrl = `https://pay.sumup.com/b2c/QR0QLE0Y?amount=${amountValue}&email=${encodeURIComponent(donorEmail)}&name=${encodeURIComponent(donorName)}`;
+    // Build SumUp payment URL with query parameters using the mapped link
+    const baseLink = sumupLinks[selectedOption] || DEFAULT_SUMUP_LINK;
+    const sumupUrl = `${baseLink}?amount=${amountValue}&email=${encodeURIComponent(donorEmail)}&name=${encodeURIComponent(donorName)}`;
 
     // Open SumUp payment page in a new tab
     window.open(sumupUrl, '_blank');
@@ -77,7 +92,7 @@ export default function Donate() {
       <Helmet>
         <title>Donate — Ayoub Welfare CIC</title>
         <meta name="description" content="Support clean water, food, medical and education projects. 100% donation-based, every donation is an Amanah." />
-        <link rel="canonical" href="https://ayoub-legacy-aid.lovable.app/donate" />
+        <link rel="canonical" href="https://ayoubwelfare.org/donate" />
       </Helmet>
       <PageHero eyebrow="Donate" title="Be part of the change." description="Your gift is an Amanah — a sacred trust. 100% of donations go to programmes; our team in Pakistan delivers directly to communities." />
       <section className="mx-auto max-w-3xl px-6 py-16">

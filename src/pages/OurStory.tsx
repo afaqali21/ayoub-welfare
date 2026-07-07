@@ -10,7 +10,7 @@ export default function OurStory() {
       <Helmet>
         <title>Our Story — Ayoub Welfare CIC</title>
         <meta name="description" content="Founded in loving memory of a beloved uncle from Eastern Gujar Khan, Pakistan." />
-        <link rel="canonical" href="https://ayoub-legacy-aid.lovable.app/our-story" />
+        <link rel="canonical" href="https://ayoubwelfare.org/our-story" />
       </Helmet>
       <PageHero eyebrow="Our Story" title="A legacy of compassion." description="Ayoub Welfare CIC was founded in loving memory of a beloved uncle, who came from a small village in Eastern Gujar Khan, Pakistan." />
       <section className="mx-auto max-w-5xl px-6 py-20">
