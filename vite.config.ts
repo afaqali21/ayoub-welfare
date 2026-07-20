@@ -9,6 +9,10 @@ export default defineConfig({
     host: "::",
     port: 8080,
     strictPort: true,
+    proxy: {
+      "/api": "http://localhost:5000",
+      "/uploads": "http://localhost:5000",
+    },
   },
   preview: {
     host: "::",

@@ -1,11 +1,34 @@
 // API service for backend communication
 
-const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://localhost:5000/api');
+// In production, always use same-origin /api — never localhost (common Vercel misconfig).
+function resolveApiBase(): string {
+  const envUrl = import.meta.env.VITE_API_URL as string | undefined;
+  if (import.meta.env.PROD) {
+    if (!envUrl || envUrl.includes('localhost')) return '/api';
+    return envUrl;
+  }
+  return envUrl || '/api';
+}
+
+const API_BASE = resolveApiBase();
+
+async function apiFetch(input: string, init?: RequestInit) {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(
+        'Cannot reach the server. Start the backend with "npm run dev:all" or run "npm start" in the backend folder.'
+      );
+    }
+    throw error;
+  }
+}
 
 export class ApiService {
   // ─── Auth ───
   static async loginAdmin(username: string, password: string) {
-    const response = await fetch(`${API_BASE}/auth/login`, {
+    const response = await apiFetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -27,7 +50,7 @@ export class ApiService {
     currency?: string;
     description?: string;
   }) {
-    const response = await fetch(`${API_BASE}/projects`, {
+    const response = await apiFetch(`${API_BASE}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -44,13 +67,13 @@ export class ApiService {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    const response = await fetch(`${API_BASE}/projects`, { headers });
+    const response = await apiFetch(`${API_BASE}/projects`, { headers });
     if (!response.ok) throw new Error('Failed to fetch projects');
     return response.json();
   }
 
   static async getProject(id: string) {
-    const response = await fetch(`${API_BASE}/projects/${id}`);
+    const response = await apiFetch(`${API_BASE}/projects/${id}`);
     if (!response.ok) throw new Error('Project not found');
     return response.json();
   }
@@ -58,7 +81,7 @@ export class ApiService {
   static async uploadImage(file: File) {
     const formData = new FormData();
     formData.append('image', file);
-    const response = await fetch(`${API_BASE}/upload`, {
+    const response = await apiFetch(`${API_BASE}/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -73,7 +96,7 @@ export class ApiService {
   }
 
   static async addUpdate(projectId: string, data: { title: string; body: string; imageUrl?: string; imageCaption?: string; }, token: string) {
-    const response = await fetch(`${API_BASE}/projects/${projectId}/updates`, {
+    const response = await apiFetch(`${API_BASE}/projects/${projectId}/updates`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -93,7 +116,7 @@ export class ApiService {
     status: 'pending' | 'in_progress' | 'completed',
     token: string
   ) {
-    const response = await fetch(`${API_BASE}/projects/${projectId}/status`, {
+    const response = await apiFetch(`${API_BASE}/projects/${projectId}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -109,7 +132,7 @@ export class ApiService {
   }
 
   static async deleteProject(projectId: string, token: string) {
-    const response = await fetch(`${API_BASE}/projects/${projectId}`, {
+    const response = await apiFetch(`${API_BASE}/projects/${projectId}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

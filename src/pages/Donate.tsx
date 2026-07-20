@@ -68,22 +68,33 @@ export default function Donate() {
     const baseLink = sumupLinks[selectedOption] || DEFAULT_SUMUP_LINK;
     const sumupUrl = `${baseLink}?amount=${amountValue}&email=${encodeURIComponent(donorEmail)}&name=${encodeURIComponent(donorName)}`;
 
-    // Open SumUp payment page in a new tab
-    window.open(sumupUrl, '_blank');
-
-    // Optimistically set success data with a tracking ID placeholder
+    // Prepare project data for the backend
     const causeLabel = causes.find((c) => c.id === cause)?.label || cause;
-    setSuccessData({
-      id: 'TRACKING-' + Math.random().toString(36).substr(2, 9).toUpperCase(),
+    const projectData = {
       donorName,
       donorEmail,
       type: causeLabel,
+      location: 'To be determined',
       amount: amountValue,
       currency: 'GBP',
       description: causeDescriptions[cause],
-      location: 'To be determined',
-    });
-    setStep('success');
+    };
+
+    setIsLoading(true);
+    try {
+      // Create project in backend (triggers email)
+      const createdProject = await ApiService.createProject(projectData);
+      // Open SumUp payment page in a new tab
+      window.open(sumupUrl, '_blank');
+      // Use backend response for success display
+      setSuccessData(createdProject);
+      setStep('success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message || 'Failed to create project');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const finalAmount = custom || amount;
