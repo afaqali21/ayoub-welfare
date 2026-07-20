@@ -31,10 +31,10 @@ class InMemoryDb {
 
     // Seed default admin synchronously to prevent race conditions during serverless startup
     try {
-      const hashed = bcryptjs.hashSync('admin123', 10);
+      const hashed = bcryptjs.hashSync('admin@2026', 10);
       this.admins.push({
         id: 'admin-id-default',
-        username: 'admin',
+        username: 'admincic',
         password: hashed,
         email: 'admin@ayoubwelfare.org'
       });
@@ -348,12 +348,12 @@ const db = {
     }
 
     // Ensure a default admin exists
-    const adminExists = await db.prepare('SELECT 1 FROM admins WHERE username = ?').get('admin');
+    const adminExists = await db.prepare('SELECT 1 FROM admins WHERE username = ?').get('admincic');
     if (!adminExists) {
-      const hashed = await bcryptjs.hash('admin123', 10);
+      const hashed = await bcryptjs.hash('admin@2026', 10);
       await db.prepare('INSERT INTO admins (id, username, password, email) VALUES (?, ?, ?, ?)')
-        .run(uuidv4(), 'admin', hashed, 'admin@ayoubwelfare.org');
-      console.log('✅ Default admin created (username=admin, password=admin123)');
+        .run(uuidv4(), 'admincic', hashed, 'admin@ayoubwelfare.org');
+      console.log('✅ Default admin created (username=admincic)');
     }
   } catch (err) {
     console.error('❌ Database setup / seeding failed:', err.message);
@@ -424,6 +424,12 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
   },
+  // Shared hosting often uses a different cert hostname (e.g. mail.preciousflux.com)
+  tls: {
+    servername: process.env.SMTP_TLS_SERVERNAME || undefined,
+    // Allow mismatched cert hostname when the provider's cert doesn't match SMTP_HOST
+    rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== 'false',
+  },
 });
 
 async function sendEmail(to, subject, html) {
@@ -438,6 +444,36 @@ async function sendEmail(to, subject, html) {
   } catch (err) {
     console.error(`❌ Email failed for ${to}:`, err.message);
   }
+}
+
+function getInfoEmail() {
+  return process.env.INFO_EMAIL || process.env.EMAIL_USER || 'info@ayoubwelfare.org';
+}
+
+async function notifyInfoOfNewProject({ projectId, donorName, donorEmail, type, amount, currency, location, description }) {
+  const adminLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/admin`;
+  const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${projectId}`;
+  const html = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+<h2 style="color: #16a34a;">New project created</h2>
+<p>A customer has just created a new project.</p>
+<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+  <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Reference</strong></td><td style="padding: 8px 0; border-bottom: 1px solid #eee;">${projectId}</td></tr>
+  <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Donor name</strong></td><td style="padding: 8px 0; border-bottom: 1px solid #eee;">${donorName}</td></tr>
+  <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Donor email</strong></td><td style="padding: 8px 0; border-bottom: 1px solid #eee;">${donorEmail}</td></tr>
+  <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Project type</strong></td><td style="padding: 8px 0; border-bottom: 1px solid #eee;">${type}</td></tr>
+  <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Amount</strong></td><td style="padding: 8px 0; border-bottom: 1px solid #eee;">£${amount} ${currency || 'GBP'}</td></tr>
+  <tr><td style="padding: 8px 0; border-bottom: 1px solid #eee;"><strong>Location</strong></td><td style="padding: 8px 0; border-bottom: 1px solid #eee;">${location || 'To be determined'}</td></tr>
+  <tr><td style="padding: 8px 0;"><strong>Description</strong></td><td style="padding: 8px 0;">${description || '—'}</td></tr>
+</table>
+<p style="margin-top: 20px;">
+  <a href="${adminLink}" style="display: inline-block; background-color: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">Open Admin Panel</a>
+  &nbsp;
+  <a href="${trackingLink}" style="display: inline-block; background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">View Tracker</a>
+</p>
+<hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;"/>
+<p style="color: #666; font-size: 12px;">Ayoub Welfare CIC — internal notification</p>
+</div>`;
+  await sendEmail(getInfoEmail(), `New Project — ${projectId} (${donorName})`, html);
 }
 
 // ---------- Auth ----------
@@ -499,6 +535,16 @@ app.post('/api/projects', async (req, res) => {
 <p style="color: #666; font-size: 12px;">Ayoub Welfare CIC - Your donation is an Amanah</p>
 </div>`;
     await sendEmail(donorEmail, `Project Created - Reference: ${projectId}`, emailHtml);
+    await notifyInfoOfNewProject({
+      projectId,
+      donorName,
+      donorEmail,
+      type,
+      amount,
+      currency: currency || 'GBP',
+      location: location || 'To be determined',
+      description: description || `${type} project funded by generous donor`,
+    });
 
     const createdProject = await getProjectWithUpdates(projectId);
     res.status(201).json(createdProject);
@@ -647,7 +693,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`🚀 Ayoub Welfare Backend running on http://localhost:${PORT}`);
     console.log(`📧 Email service: ${process.env.EMAIL_USER ? 'Configured' : 'Not configured (update .env)'}`);
-    console.log(`🔐 Admin login: username=admin, password=admin123`);
+    console.log(`🔐 Admin login: username=admincic`);
   });
 }
 

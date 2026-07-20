@@ -474,7 +474,7 @@ export default function AdminPanel() {
                 {loading ? "Logging in..." : "Login"}
               </button>
             </div>
-            <p style={{ margin: "16px 0 0", fontSize: 12, color: "#9ca3af" }}>Default: username=admin, password=admin123</p>
+            <p style={{ margin: "16px 0 0", fontSize: 12, color: "#9ca3af" }}></p>
           </div>
         ) : (
           <>

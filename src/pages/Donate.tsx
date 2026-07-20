@@ -22,19 +22,23 @@ const causeDescriptions: Record<string, string> = {
   general: "Direct support to communities most in need",
 };
 
-// Mapping option/cause IDs to their specific SumUp payment links
+// Keys must match selectedOption values (cause ids + water pump options)
 const sumupLinks: Record<string, string> = {
   "small-hand-pump": "https://pay.sumup.com/b2c/Q3SFB3ER",
-  // You can add more mapping here in the future, for example:
   "large-hand-pump": "https://pay.sumup.com/b2c/QH9MS7BW",
   "small-solar-pump": "https://pay.sumup.com/b2c/QZZ4HOXY",
-   "food": "https://pay.sumup.com/b2c/QHZX6IB5",
-   "Aqeeqa Bakra":"https://pay.sumup.com/b2c/QHZWXAVK",
-   "Ayoub Brighter Homes": "https://pay.sumup.com/b2c/QMDA7E56",
-   "Wheel Chair": "https://pay.sumup.com/b2c/QQ48WBHK",
+  food: "https://pay.sumup.com/b2c/QHZX6IB5",
+  medical: "https://pay.sumup.com/b2c/QHZWXAVK",
+  "brighter-homes": "https://pay.sumup.com/b2c/QMDA7E56",
+  general: "https://pay.sumup.com/b2c/QQ48WBHK",
 };
 
 const DEFAULT_SUMUP_LINK = "https://pay.sumup.com/b2c/QR0QLE0Y";
+
+function buildSumUpUrl(optionId: string, amountValue: number, name: string, email: string) {
+  const baseLink = sumupLinks[optionId] || DEFAULT_SUMUP_LINK;
+  return `${baseLink}?amount=${amountValue}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`;
+}
 
 export default function Donate() {
   const [cause, setCause] = useState("water");
@@ -49,6 +53,7 @@ export default function Donate() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [successData, setSuccessData] = useState<any>(null);
+  const [paymentUrl, setPaymentUrl] = useState("");
 
   const handleProceed = async () => {
     // Validate input fields
@@ -63,10 +68,13 @@ export default function Donate() {
 
     // Calculate donation amount
     const amountValue = selectedPrice || parseFloat(custom || amount.toString());
+    if (!amountValue || Number.isNaN(amountValue)) {
+      setError('Please select a donation amount');
+      return;
+    }
 
-    // Build SumUp payment URL with query parameters using the mapped link
-    const baseLink = sumupLinks[selectedOption] || DEFAULT_SUMUP_LINK;
-    const sumupUrl = `${baseLink}?amount=${amountValue}&email=${encodeURIComponent(donorEmail)}&name=${encodeURIComponent(donorName)}`;
+    const optionId = selectedOption || cause;
+    const sumupUrl = buildSumUpUrl(optionId, amountValue, donorName, donorEmail);
 
     // Prepare project data for the backend
     const causeLabel = causes.find((c) => c.id === cause)?.label || cause;
@@ -81,15 +89,26 @@ export default function Donate() {
     };
 
     setIsLoading(true);
+    setError("");
+
+    // Open a tab immediately (while still in the click handler) so browsers don't block it
+    const paymentWindow = window.open("about:blank", "_blank");
+
     try {
       // Create project in backend (triggers email)
       const createdProject = await ApiService.createProject(projectData);
-      // Open SumUp payment page in a new tab
-      window.open(sumupUrl, '_blank');
-      // Use backend response for success display
+      setPaymentUrl(sumupUrl);
       setSuccessData(createdProject);
-      setStep('success');
+      setStep("success");
+
+      if (paymentWindow && !paymentWindow.closed) {
+        paymentWindow.location.href = sumupUrl;
+      }
+      // If the popup was blocked, the success screen shows a "Complete Payment" button
     } catch (err) {
+      if (paymentWindow && !paymentWindow.closed) {
+        paymentWindow.close();
+      }
       const message = err instanceof Error ? err.message : String(err);
       setError(message || 'Failed to create project');
     } finally {
@@ -278,7 +297,7 @@ export default function Donate() {
               </div>
 
               <div className="mt-8 space-y-3">
-                <a href={`/donor-project-tracker?id=${successData.id}`} className="block w-full rounded-full bg-btn-donate px-8 py-4 text-center text-base font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5">
+                <a href={`/donor-project-tracker?id=${successData.id}`} className="bg-btn-donate block w-full rounded-full border-2 border-btn-donate px-8 py-4 text-center text-base font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5">
                   Track Your Project
                 </a>
                 <a href="/" className="block w-full rounded-full border-2 border-btn-donate px-8 py-4 text-center text-base font-semibold text-btn-donate hover:bg-btn-donate/5">
