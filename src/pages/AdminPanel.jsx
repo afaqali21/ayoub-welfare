@@ -121,7 +121,7 @@ function ProjectCard({ project, onClick, onMarkComplete }) {
   );
 }
 
-function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete }) {
+function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete, onUnauthorized }) {
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [newUpdate, setNewUpdate] = useState({ title: "", body: "", file: null, imageCaption: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -143,6 +143,9 @@ function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete 
     } catch (error) {
       console.error("Failed to delete project:", error);
       alert("Failed to delete project: " + (error.message || "Server error"));
+      if (error.message && error.message.toLowerCase().includes("unauthorized")) {
+        onUnauthorized?.();
+      }
     } finally {
       setIsDeleting(false);
     }
@@ -176,6 +179,9 @@ function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete 
         setShowUpdateForm(false);
       } catch (error) {
         setUpdateError(error.message || "Failed to add update");
+        if (error.message && error.message.toLowerCase().includes("unauthorized")) {
+          onUnauthorized?.();
+        }
       } finally {
         setIsSubmitting(false);
       }
@@ -191,6 +197,9 @@ function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete 
     } catch (error) {
       console.error("Failed to update status:", error);
       alert("Failed to update status: " + (error.message || "Server error"));
+      if (error.message && error.message.toLowerCase().includes("unauthorized")) {
+        onUnauthorized?.();
+      }
     } finally {
       setIsStatusLoading(false);
     }
@@ -403,6 +412,9 @@ export default function AdminPanel() {
     } catch (error) {
       console.error("Failed to mark project as complete:", error);
       alert("Error: " + (error.message || "Failed to update status on server"));
+      if (error.message && error.message.toLowerCase().includes("unauthorized")) {
+        handleAdminLogout();
+      }
     }
   }
 
@@ -506,6 +518,7 @@ export default function AdminPanel() {
                 onAddUpdate={handleAddUpdate}
                 onStatusChange={handleStatusChange}
                 onDelete={handleDeleteProject}
+                onUnauthorized={handleAdminLogout}
               />
             )}
           </>

@@ -68,6 +68,11 @@ class InMemoryDb {
           const id = args[0];
           return this.projects.find(p => p.id === id);
         }
+        // SELECT * FROM projects WHERE checkoutId = ?
+        if (normalizedSql.includes('SELECT * FROM projects WHERE checkoutId = ?')) {
+          const checkoutId = args[0];
+          return this.projects.find(p => p.checkoutId === checkoutId);
+        }
         // SELECT COUNT(*) AS cnt FROM projects
         if (normalizedSql.includes('SELECT COUNT(*) AS cnt FROM projects')) {
           return { cnt: this.projects.length };
@@ -97,10 +102,10 @@ class InMemoryDb {
           this.admins.push({ id, username, password, email });
           return { lastInsertRowid: this.admins.length };
         }
-        // INSERT INTO projects (id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt)
+        // INSERT INTO projects (id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt, checkoutId)
         if (normalizedSql.includes('INSERT INTO projects')) {
-          const [id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt] = args;
-          this.projects.push({ id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt });
+          const [id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt, checkoutId] = args;
+          this.projects.push({ id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt, checkoutId: checkoutId || null });
           return { lastInsertRowid: id };
         }
         // INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)
@@ -195,6 +200,7 @@ function normalizeKeys(row) {
     else if (key === 'startdate') newKey = 'startDate';
     else if (key === 'createdat') newKey = 'createdAt';
     else if (key === 'projectid') newKey = 'projectId';
+    else if (key === 'checkoutid') newKey = 'checkoutId';
     mapped[newKey] = row[key];
   }
   return mapped;
@@ -301,7 +307,8 @@ const db = {
           customInfo TEXT,
           startDate TEXT,
           status TEXT NOT NULL,
-          createdAt TEXT NOT NULL
+          createdAt TEXT NOT NULL,
+          checkoutId TEXT
         );
         CREATE TABLE IF NOT EXISTS updates (
           id SERIAL PRIMARY KEY,
@@ -333,7 +340,8 @@ const db = {
           customInfo TEXT,
           startDate TEXT,
           status TEXT NOT NULL,
-          createdAt TEXT NOT NULL
+          createdAt TEXT NOT NULL,
+          checkoutId TEXT
         );
         CREATE TABLE IF NOT EXISTS updates (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -345,6 +353,21 @@ const db = {
           FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE
         );
       `);
+    }
+
+    // Auto-migrate: Add checkoutId column to projects if it does not exist
+    try {
+      if (dbType === 'postgres') {
+        await db.exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS checkoutId TEXT;`);
+      } else if (dbType === 'sqlite') {
+        await db.exec(`ALTER TABLE projects ADD COLUMN checkoutId TEXT;`);
+      }
+      console.log('✅ Checked database schema for checkoutId column.');
+    } catch (err) {
+      // Column might already exist, safe to ignore
+      if (!err.message.includes('duplicate column') && !err.message.includes('already exists')) {
+        console.warn('⚠️ Schema migration warning:', err.message);
+      }
     }
 
     // Ensure a default admin exists
@@ -492,6 +515,61 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // ---------- Project Endpoints ----------
+// ---------- Project Activation Helper ----------
+async function activateProject(projectId) {
+  const proj = await db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+  if (!proj) {
+    console.warn(`[activateProject] Project not found: ${projectId}`);
+    return false;
+  }
+  
+  // Only activate if currently unpaid
+  if (proj.status !== 'unpaid') {
+    console.log(`[activateProject] Project ${projectId} is already in status: ${proj.status}`);
+    return false;
+  }
+  
+  console.log(`[activateProject] Activating project ${projectId} (updating status to pending)...`);
+  
+  // 1. Update status to 'pending'
+  await db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('pending', projectId);
+  
+  // 2. Insert initial update
+  const now = new Date();
+  const startDate = now.toISOString().slice(0, 10);
+  await db.prepare(`INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)`)
+    .run(projectId, startDate, 'Project Initiated', 'Your donation has been received and we are planning the implementation. You will receive updates as work progresses.', JSON.stringify([]));
+    
+  // 3. Send email to donor
+  const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${projectId}`;
+  const emailHtml = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+<h2 style="color: #16a34a;">🌿 Thank you for your donation!</h2>
+<p>Dear ${proj.donorName},</p>
+<p>We have received your generous donation of <strong>£${proj.amount}</strong> for <strong>${proj.type}</strong>.</p>
+<p>Your project reference ID is: <strong>${projectId}</strong></p>
+<p style="margin-top: 20px;"><a href="${trackingLink}" style="display: inline-block; background-color: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">Track Your Project</a></p>
+<p>You can use the link above to track the progress of your project. We will send you updates as work progresses.</p>
+<hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;"/>
+<p style="color: #666; font-size: 12px;">Ayoub Welfare CIC - Your donation is an Amanah</p>
+</div>`;
+  await sendEmail(proj.donorEmail, `Project Created - Reference: ${projectId}`, emailHtml);
+  
+  // 4. Send notification email to admin/info
+  await notifyInfoOfNewProject({
+    projectId,
+    donorName: proj.donorName,
+    donorEmail: proj.donorEmail,
+    type: proj.type,
+    amount: proj.amount,
+    currency: proj.currency || 'GBP',
+    location: proj.location || 'To be determined',
+    description: proj.description || `${proj.type} project funded by generous donor`,
+  });
+  
+  return true;
+}
+
+// ---------- Project Endpoints ----------
 app.post('/api/projects', async (req, res) => {
   try {
     const { donorName, donorEmail, type, location, amount, currency, description, customInfo } = req.body;
@@ -502,9 +580,59 @@ app.post('/api/projects', async (req, res) => {
     const now = new Date();
     const startDate = now.toISOString().slice(0, 10);
     const createdAt = now.toISOString();
+
+    const isSumUpConfigured = !!(
+      process.env.SUMUP_ACCESS_TOKEN && 
+      process.env.SUMUP_MERCHANT_CODE && 
+      process.env.SUMUP_ACCESS_TOKEN !== 'your_sumup_developer_access_token'
+    );
+    const initialStatus = isSumUpConfigured ? 'unpaid' : 'pending';
+
+    let checkoutId = null;
+    let paymentUrl = null;
+
+    // Call SumUp checkout API if keys are present
+    if (isSumUpConfigured) {
+      try {
+        console.log(`Creating SumUp checkout session for project ${projectId}...`);
+        const sumupResponse = await fetch('https://api.sumup.com/v0.1/checkouts', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.SUMUP_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            checkout_reference: projectId,
+            amount: Number(amount),
+            currency: currency || 'GBP',
+            merchant_code: process.env.SUMUP_MERCHANT_CODE,
+            description: description || `${type} project funded by generous donor`
+          })
+        });
+
+        if (sumupResponse.ok) {
+          const checkoutData = await sumupResponse.json();
+          checkoutId = checkoutData.id;
+          paymentUrl = checkoutData.hosted_checkout?.url;
+          console.log(`✅ SumUp checkout created. ID: ${checkoutId}, URL: ${paymentUrl}`);
+        } else {
+          const errorText = await sumupResponse.text();
+          console.error(`❌ SumUp checkout creation failed (HTTP ${sumupResponse.status}): ${errorText}`);
+          return res.status(500).json({ 
+            error: `SumUp payment initialization failed (HTTP ${sumupResponse.status}). Please check your developer token/merchant code or turn on a VPN if testing from a restricted region.` 
+          });
+        }
+      } catch (err) {
+        console.error('❌ Error calling SumUp API:', err);
+        return res.status(500).json({ 
+          error: 'Failed to communicate with SumUp payment gateway. Please verify internet connection or VPN status.' 
+        });
+      }
+    }
     
-    await db.prepare(`INSERT INTO projects (id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    await db.prepare(`INSERT INTO projects (id, donorName, donorEmail, type, location, amount, currency, description, customInfo, startDate, status, createdAt, checkoutId)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         projectId,
         donorName,
@@ -516,15 +644,20 @@ app.post('/api/projects', async (req, res) => {
         description || `${type} project funded by generous donor`,
         JSON.stringify(customInfo || {}),
         startDate,
-        'pending',
-        createdAt
+        initialStatus,
+        createdAt,
+        checkoutId
       );
-    // Initial update entry
-    await db.prepare(`INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)`)
-      .run(projectId, startDate, 'Project Initiated', 'Your donation has been received and we are planning the implementation. You will receive updates as work progresses.', JSON.stringify([]));
 
-    const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${projectId}`;
-    const emailHtml = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
+    // If SumUp is not configured (demo/fallback mode), activate project immediately
+    if (!isSumUpConfigured) {
+      // 1. Initial update entry
+      await db.prepare(`INSERT INTO updates (projectId, date, title, body, images) VALUES (?, ?, ?, ?, ?)`)
+        .run(projectId, startDate, 'Project Initiated', 'Your donation has been received and we are planning the implementation. You will receive updates as work progresses.', JSON.stringify([]));
+
+      // 2. Send donor email
+      const trackingLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/donor-project-tracker?id=${projectId}`;
+      const emailHtml = `<div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
 <h2 style="color: #16a34a;">🌿 Thank you for your donation!</h2>
 <p>Dear ${donorName},</p>
 <p>We have received your generous donation of <strong>£${amount}</strong> for <strong>${type}</strong>.</p>
@@ -534,29 +667,86 @@ app.post('/api/projects', async (req, res) => {
 <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;"/>
 <p style="color: #666; font-size: 12px;">Ayoub Welfare CIC - Your donation is an Amanah</p>
 </div>`;
-    await sendEmail(donorEmail, `Project Created - Reference: ${projectId}`, emailHtml);
-    await notifyInfoOfNewProject({
-      projectId,
-      donorName,
-      donorEmail,
-      type,
-      amount,
-      currency: currency || 'GBP',
-      location: location || 'To be determined',
-      description: description || `${type} project funded by generous donor`,
-    });
+      await sendEmail(donorEmail, `Project Created - Reference: ${projectId}`, emailHtml);
+
+      // 3. Notify Admin
+      await notifyInfoOfNewProject({
+        projectId,
+        donorName,
+        donorEmail,
+        type,
+        amount,
+        currency: currency || 'GBP',
+        location: location || 'To be determined',
+        description: description || `${type} project funded by generous donor`,
+      });
+    }
 
     const createdProject = await getProjectWithUpdates(projectId);
-    res.status(201).json(createdProject);
+    res.status(201).json({ ...createdProject, paymentUrl });
   } catch (err) {
     console.error('Error creating project:', err);
     res.status(500).json({ error: 'Failed to create project' });
   }
 });
 
+// ---------- SumUp Webhook Endpoint ----------
+app.post('/api/webhooks/sumup', async (req, res) => {
+  try {
+    const { event_type, id } = req.body;
+    console.log(`📥 Received SumUp webhook: ${event_type} for ID: ${id}`);
+    
+    // Acknowledge receipt of webhook immediately to prevent retries
+    res.status(200).send();
+
+    if (event_type !== 'CHECKOUT_STATUS_CHANGED') {
+      return;
+    }
+
+    const token = process.env.SUMUP_ACCESS_TOKEN;
+    if (!token) {
+      console.warn('⚠️ Webhook received but SUMUP_ACCESS_TOKEN is not configured.');
+      return;
+    }
+
+    // Verify payment by checking status directly with SumUp API
+    console.log(`Checking status of checkout ${id} with SumUp...`);
+    const sumupResponse = await fetch(`https://api.sumup.com/v0.1/checkouts/${id}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!sumupResponse.ok) {
+      console.error(`❌ Failed to fetch checkout details from SumUp. Status: ${sumupResponse.status}`);
+      return;
+    }
+
+    const checkout = await sumupResponse.json();
+    console.log(`🔍 SumUp Checkout ${id} status is: ${checkout.status}`);
+
+    if (checkout.status === 'PAID') {
+      const project = await db.prepare('SELECT * FROM projects WHERE checkoutId = ?').get(id);
+      if (project) {
+        console.log(`✅ Activating project ${project.id} matched with checkout ${id}.`);
+        await activateProject(project.id);
+      } else {
+        console.warn(`⚠️ No project found matching checkoutId: ${id}`);
+      }
+    }
+  } catch (err) {
+    console.error('❌ Error processing SumUp webhook:', err);
+  }
+});
+
+
 app.get('/api/projects', async (req, res) => {
   try {
-    const rows = await db.prepare('SELECT * FROM projects').all();
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+
+    const rows = await db.prepare('SELECT * FROM projects WHERE status != ?').all('unpaid');
     const projects = await Promise.all(rows.map(async p => {
       const proj = { ...p, customInfo: p.customInfo ? (typeof p.customInfo === 'string' ? JSON.parse(p.customInfo) : p.customInfo) : {} };
       const updates = await db.prepare('SELECT * FROM updates WHERE projectId = ? ORDER BY id').all(p.id);
@@ -579,7 +769,7 @@ app.get('/api/projects', async (req, res) => {
 app.get('/api/projects/:id', async (req, res) => {
   try {
     const project = await getProjectWithUpdates(req.params.id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!project || project.status === 'unpaid') return res.status(404).json({ error: 'Project not found' });
     res.json(project);
   } catch (err) {
     console.error('Error fetching project:', err);
