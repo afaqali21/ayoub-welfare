@@ -27,7 +27,7 @@ const sumupLinks: Record<string, string> = {
   "small-hand-pump": "https://pay.sumup.com/b2c/Q3SFB3ER",
   "large-hand-pump": "https://pay.sumup.com/b2c/QH9MS7BW",
   "small-solar-pump": "https://pay.sumup.com/b2c/QZZ4HOXY",
-  food: "https://pay.sumup.com/b2c/QHZX6IB5",
+  food: "https://pay.sumup.com/b2c/Q4XLQIYK",
   medical: "https://pay.sumup.com/b2c/QHZWXAVK",
   "brighter-homes": "https://pay.sumup.com/b2c/QMDA7E56",
   general: "https://pay.sumup.com/b2c/QQ48WBHK",
@@ -179,7 +179,7 @@ export default function Donate() {
                   {/* Show price for selected cause */}
                   <p className="mb-2 text-lg font-medium">
                     {cause === "general" && "Wheel Chair – £60"}
-                    {cause === "food" && "Food Parcel – £15"}
+                    {cause === "food" && "Food Parcel – £25"}
                     {cause === "medical" && "Aqeeqa Bakra – £90"}
                     {cause === "brighter-homes" && "Ayoub Brighter Homes – £150"}
                   </p>
@@ -187,7 +187,7 @@ export default function Donate() {
                     onClick={() => {
                       let price = 0;
                       if (cause === "general") price = 60;
-                      else if (cause === "food") price = 15;
+                      else if (cause === "food") price = 25;
                        else if (cause === "medical") price = 90;
                        else if (cause === "brighter-homes") price = 150;
                       else if (cause === "medical") price = 90;
@@ -198,7 +198,7 @@ export default function Donate() {
                     }}
                     className="w-full rounded-full bg-btn-donate px-8 py-4 text-base font-semibold text-white shadow-lg transition-transform hover:-translate-y-0.5"
                   >
-                    Continue: £{cause === "general" ? 60 : cause === "food" ? 15 : cause === "medical" ? 90 : cause === "brighter-homes" ? 150 : ''}
+                    Continue: £{cause === "general" ? 60 : cause === "food" ? 25 : cause === "medical" ? 90 : cause === "brighter-homes" ? 150 : ''}
                   </button>
                 </div>
               )}
