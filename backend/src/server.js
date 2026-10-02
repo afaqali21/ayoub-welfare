@@ -594,7 +594,9 @@ app.post('/api/projects', async (req, res) => {
     // Call SumUp checkout API if keys are present
     if (isSumUpConfigured) {
       try {
-        console.log(`Creating SumUp checkout session for project ${projectId}...`);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
+
         const sumupResponse = await fetch('https://api.sumup.com/v0.1/checkouts', {
           method: 'POST',
           headers: {
@@ -607,27 +609,26 @@ app.post('/api/projects', async (req, res) => {
             amount: Number(amount),
             currency: currency || 'GBP',
             merchant_code: process.env.SUMUP_MERCHANT_CODE,
-            description: description || `${type} project funded by generous donor`
+            description: description || `${type} project funded by generous donor`,
+            redirect_url: `${frontendUrl}/donor-project-tracker?id=${projectId}&payment=complete`,
+            return_url: `${backendUrl}/api/webhooks/sumup`,
+            hosted_checkout: {
+              enabled: true
+            }
           })
         });
 
         if (sumupResponse.ok) {
           const checkoutData = await sumupResponse.json();
           checkoutId = checkoutData.id;
-          paymentUrl = checkoutData.hosted_checkout?.url;
-          console.log(`✅ SumUp checkout created. ID: ${checkoutId}, URL: ${paymentUrl}`);
+          paymentUrl = checkoutData.hosted_checkout?.url || null;
+          console.log(`✅ SumUp checkout created. ID: ${checkoutId}, URL: ${paymentUrl || '(using fallback direct link)'}`);
         } else {
           const errorText = await sumupResponse.text();
-          console.error(`❌ SumUp checkout creation failed (HTTP ${sumupResponse.status}): ${errorText}`);
-          return res.status(500).json({ 
-            error: `SumUp payment initialization failed (HTTP ${sumupResponse.status}). Please check your developer token/merchant code or turn on a VPN if testing from a restricted region.` 
-          });
+          console.warn(`⚠️ SumUp API checkout creation warning (HTTP ${sumupResponse.status}): ${errorText}. Using direct category payment link.`);
         }
       } catch (err) {
-        console.error('❌ Error calling SumUp API:', err);
-        return res.status(500).json({ 
-          error: 'Failed to communicate with SumUp payment gateway. Please verify internet connection or VPN status.' 
-        });
+        console.warn('⚠️ Error calling SumUp API, falling back to direct category payment link:', err.message);
       }
     }
     
@@ -690,16 +691,16 @@ app.post('/api/projects', async (req, res) => {
   }
 });
 
-// ---------- SumUp Webhook Endpoint ----------
-app.post('/api/webhooks/sumup', async (req, res) => {
+// ---------- SumUp Webhook / Return Callback Endpoint ----------
+app.all('/api/webhooks/sumup', async (req, res) => {
   try {
-    const { event_type, id } = req.body;
-    console.log(`📥 Received SumUp webhook: ${event_type} for ID: ${id}`);
+    const checkoutId = req.body?.id || req.body?.checkout_id || req.query?.id || req.query?.checkout_id;
+    console.log(`📥 Received SumUp webhook/callback for checkout: ${checkoutId}`);
     
-    // Acknowledge receipt of webhook immediately to prevent retries
-    res.status(200).send();
+    // Acknowledge receipt immediately
+    res.status(200).send('OK');
 
-    if (event_type !== 'CHECKOUT_STATUS_CHANGED') {
+    if (!checkoutId) {
       return;
     }
 
@@ -710,8 +711,8 @@ app.post('/api/webhooks/sumup', async (req, res) => {
     }
 
     // Verify payment by checking status directly with SumUp API
-    console.log(`Checking status of checkout ${id} with SumUp...`);
-    const sumupResponse = await fetch(`https://api.sumup.com/v0.1/checkouts/${id}`, {
+    console.log(`Checking status of checkout ${checkoutId} with SumUp...`);
+    const sumupResponse = await fetch(`https://api.sumup.com/v0.1/checkouts/${checkoutId}`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/json'
@@ -724,19 +725,19 @@ app.post('/api/webhooks/sumup', async (req, res) => {
     }
 
     const checkout = await sumupResponse.json();
-    console.log(`🔍 SumUp Checkout ${id} status is: ${checkout.status}`);
+    console.log(`🔍 SumUp Checkout ${checkoutId} status is: ${checkout.status}`);
 
     if (checkout.status === 'PAID') {
-      const project = await db.prepare('SELECT * FROM projects WHERE checkoutId = ?').get(id);
+      const project = await db.prepare('SELECT * FROM projects WHERE checkoutId = ?').get(checkoutId);
       if (project) {
-        console.log(`✅ Activating project ${project.id} matched with checkout ${id}.`);
+        console.log(`✅ Activating project ${project.id} matched with checkout ${checkoutId}.`);
         await activateProject(project.id);
       } else {
-        console.warn(`⚠️ No project found matching checkoutId: ${id}`);
+        console.warn(`⚠️ No project found matching checkoutId: ${checkoutId}`);
       }
     }
   } catch (err) {
-    console.error('❌ Error processing SumUp webhook:', err);
+    console.error('❌ Error processing SumUp webhook/callback:', err);
   }
 });
 
@@ -768,8 +769,36 @@ app.get('/api/projects', async (req, res) => {
 
 app.get('/api/projects/:id', async (req, res) => {
   try {
-    const project = await getProjectWithUpdates(req.params.id);
-    if (!project || project.status === 'unpaid') return res.status(404).json({ error: 'Project not found' });
+    let project = await getProjectWithUpdates(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // If unpaid, double-check live status with SumUp API
+    if (project.status === 'unpaid' && project.checkoutId && process.env.SUMUP_ACCESS_TOKEN) {
+      try {
+        console.log(`Verifying SumUp payment status for project ${project.id} (checkout: ${project.checkoutId})...`);
+        const sumupCheck = await fetch(`https://api.sumup.com/v0.1/checkouts/${project.checkoutId}`, {
+          headers: {
+            'Authorization': `Bearer ${process.env.SUMUP_ACCESS_TOKEN}`,
+            'Accept': 'application/json'
+          }
+        });
+        if (sumupCheck.ok) {
+          const checkout = await sumupCheck.json();
+          console.log(`Live SumUp checkout status for ${project.id}: ${checkout.status}`);
+          if (checkout.status === 'PAID') {
+            await activateProject(project.id);
+            project = await getProjectWithUpdates(req.params.id);
+          }
+        }
+      } catch (e) {
+        console.error('Error verifying SumUp status on fetch:', e);
+      }
+    }
+
+    if (project.status === 'unpaid') {
+      return res.status(404).json({ error: 'Project not found or payment pending' });
+    }
+
     res.json(project);
   } catch (err) {
     console.error('Error fetching project:', err);

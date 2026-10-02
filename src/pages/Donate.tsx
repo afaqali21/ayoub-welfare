@@ -35,9 +35,8 @@ const sumupLinks: Record<string, string> = {
 
 const DEFAULT_SUMUP_LINK = "https://pay.sumup.com/b2c/QR0QLE0Y";
 
-function buildSumUpUrl(optionId: string, amountValue: number, name: string, email: string) {
-  const baseLink = sumupLinks[optionId] || DEFAULT_SUMUP_LINK;
-  return `${baseLink}?amount=${amountValue}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`;
+function buildSumUpUrl(optionId: string) {
+  return sumupLinks[optionId] || DEFAULT_SUMUP_LINK;
 }
 
 export default function Donate() {
@@ -74,7 +73,7 @@ export default function Donate() {
     }
 
     const optionId = selectedOption || cause;
-    const sumupUrl = buildSumUpUrl(optionId, amountValue, donorName, donorEmail);
+    const sumupUrl = buildSumUpUrl(optionId);
 
     // Prepare project data for the backend
     const causeLabel = causes.find((c) => c.id === cause)?.label || cause;
@@ -95,7 +94,7 @@ export default function Donate() {
     const paymentWindow = window.open("about:blank", "_blank");
 
     try {
-      // Create project in backend (triggers email)
+      // Create project in backend (creates unpaid project)
       const createdProject = await ApiService.createProject(projectData);
       setPaymentUrl(sumupUrl);
       setSuccessData(createdProject);
@@ -265,13 +264,13 @@ export default function Donate() {
             </>
           )}
 
-          {/* ─── Success Step ─── */}
+          {/* ─── Success / Payment Step ─── */}
           {step === "success" && successData && (
             <>
               <div className="text-center">
-                <div className="text-5xl mb-4">✅</div>
-                <h2 className="font-display text-2xl font-semibold">Thank you for your donation!</h2>
-                <p className="mt-3 text-muted-foreground">Your generosity will make a real difference.</p>
+                <div className="text-5xl mb-4">💳</div>
+                <h2 className="font-display text-2xl font-semibold">Complete Your Donation</h2>
+                <p className="mt-3 text-muted-foreground">Please complete your payment securely via SumUp below.</p>
               </div>
 
               <div className="mt-8 space-y-4 rounded-lg bg-green-50 p-6 border border-green-200">
@@ -291,17 +290,24 @@ export default function Donate() {
 
               <div className="mt-6 rounded-lg bg-blue-50 p-4 border border-blue-200">
                 <p className="text-sm text-blue-900">
-                  <strong>📧 Check your email!</strong><br/>
-                  We've sent a confirmation to <strong>{successData.donorEmail}</strong> with your project tracking link and reference ID.
+                  <strong>ℹ️ Payment Confirmation:</strong><br/>
+                  A SumUp payment window has opened. Once payment is completed, your confirmation email and tracking link will be sent to <strong>{successData.donorEmail}</strong>.
                 </p>
               </div>
 
               <div className="mt-8 space-y-3">
-                <a href={`/donor-project-tracker?id=${successData.id}`} className="bg-btn-donate block w-full rounded-full border-2 border-btn-donate px-8 py-4 text-center text-base font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5">
-                  Track Your Project
-                </a>
-                <a href="/" className="block w-full rounded-full border-2 border-btn-donate px-8 py-4 text-center text-base font-semibold text-btn-donate hover:bg-btn-donate/5">
-                  Back to Home
+                {paymentUrl && (
+                  <a 
+                    href={paymentUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="bg-btn-donate block w-full rounded-full border-2 border-btn-donate px-8 py-4 text-center text-base font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5"
+                  >
+                    Pay £{successData.amount} via SumUp ↗
+                  </a>
+                )}
+                <a href={`/donor-project-tracker?id=${successData.id}`} className="block w-full rounded-full border-2 border-btn-donate px-8 py-4 text-center text-base font-semibold text-btn-donate hover:bg-btn-donate/5">
+                  Track Project Status
                 </a>
               </div>
             </>
