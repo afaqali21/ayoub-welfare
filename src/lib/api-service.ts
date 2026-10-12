@@ -146,6 +146,21 @@ export class ApiService {
     return response.json();
   }
 
+  static async activateProject(projectId: string, token: string) {
+    const response = await apiFetch(`${API_BASE}/projects/${projectId}/activate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to activate project');
+    }
+    return response.json();
+  }
+
   // ─── Helpers ───
   static getToken() {
     return localStorage.getItem('adminToken');

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { ApiService } from "../lib/api-service";
 
 const STATUS_CONFIG = {
+  unpaid: { label: "Awaiting Payment", color: "#dc2626", bg: "#fee2e2", icon: "⏳" },
   pending: { label: "Planned", color: "#f59e0b", bg: "#fef3c7", icon: "🕐" },
   in_progress: { label: "In Progress", color: "#3b82f6", bg: "#dbeafe", icon: "🔨" },
   completed: { label: "Completed", color: "#16a34a", bg: "#dcfce7", icon: "✅" },
@@ -82,7 +83,7 @@ function Timeline({ updates }) {
   );
 }
 
-function ProjectCard({ project, onClick, onMarkComplete }) {
+function ProjectCard({ project, onClick, onMarkComplete, onConfirmPayment }) {
   const cfg = STATUS_CONFIG[project.status] || STATUS_CONFIG.pending;
   return (
     <div onClick={() => onClick(project)} style={{
@@ -100,7 +101,7 @@ function ProjectCard({ project, onClick, onMarkComplete }) {
       <p style={{ margin: "0 0 10px", fontSize: 13, color: "#6b7280" }}>📍 {project.location}</p>
       <p style={{ margin: "0 0 12px", fontSize: 13, color: "#374151", lineHeight: 1.5 }}>{project.description}</p>
       
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f3f4f6", paddingTop: 10, paddingBottom: project.status !== "completed" ? 35 : 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f3f4f6", paddingTop: 10, paddingBottom: 35 }}>
         <div>
           <span style={{ fontSize: 12, color: "#9ca3af" }}>Ref: {project.id}</span>
           <br />
@@ -109,7 +110,14 @@ function ProjectCard({ project, onClick, onMarkComplete }) {
         <span style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>£{project.amount.toLocaleString()}</span>
       </div>
 
-      {project.status !== "completed" && (
+      {project.status === "unpaid" ? (
+        <button onClick={(e) => { e.stopPropagation(); onConfirmPayment(project.id); }} style={{
+          position: "absolute", bottom: 14, right: 16,
+          padding: "6px 14px", fontSize: 12, fontWeight: 700,
+          background: "#16a34a", color: "#fff", border: "none",
+          borderRadius: 6, cursor: "pointer", boxShadow: "0 2px 4px rgba(22,163,74,0.3)",
+        }}>Confirm Payment 📩</button>
+      ) : project.status !== "completed" && (
         <button onClick={(e) => { e.stopPropagation(); onMarkComplete(project.id); }} style={{
           position: "absolute", bottom: 14, right: 16,
           padding: "6px 14px", fontSize: 12, fontWeight: 600,
@@ -121,7 +129,7 @@ function ProjectCard({ project, onClick, onMarkComplete }) {
   );
 }
 
-function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete, onUnauthorized }) {
+function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete, onConfirmPayment, onUnauthorized }) {
   const [showUpdateForm, setShowUpdateForm] = useState(false);
   const [newUpdate, setNewUpdate] = useState({ title: "", body: "", file: null, imageCaption: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -248,6 +256,25 @@ function ProjectDetail({ project, onBack, onAddUpdate, onStatusChange, onDelete,
         <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
           <strong>Donor:</strong> {project.donorName} &nbsp;|&nbsp; <strong>Email:</strong> {project.donorEmail}
         </p>
+
+        {project.status === "unpaid" && (
+          <div style={{
+            marginTop: 16, padding: "14px 18px", background: "#fef2f2",
+            border: "1.5px solid #fecaca", borderRadius: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12,
+          }}>
+            <div>
+              <p style={{ margin: 0, fontWeight: 700, color: "#991b1b", fontSize: 15 }}>⏳ Awaiting Payment</p>
+              <p style={{ margin: 0, fontSize: 13, color: "#b91c1c" }}>If payment was received via SumUp or bank, confirm below to activate tracker and dispatch confirmation emails.</p>
+            </div>
+            <button onClick={() => onConfirmPayment(project.id)} style={{
+              padding: "9px 18px", background: "#16a34a", color: "#fff",
+              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+              boxShadow: "0 2px 4px rgba(22,163,74,0.3)"
+            }}>
+              Confirm Payment & Send Email 📩
+            </button>
+          </div>
+        )}
 
         {project.status === "completed" && (
           <div style={{
@@ -418,6 +445,28 @@ export default function AdminPanel() {
     }
   }
 
+  const [filterStatus, setFilterStatus] = useState("all");
+
+  async function handleConfirmPayment(projectId) {
+    const confirmed = window.confirm(
+      `Confirm payment for project ${projectId}?\n\nThis will mark the project as Planned and immediately send confirmation emails to the donor and admin.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const token = ApiService.getToken();
+      await ApiService.activateProject(projectId, token);
+      handleStatusChange(projectId, "pending");
+      alert("✅ Payment confirmed! Confirmation emails have been sent to the donor and admin.");
+    } catch (error) {
+      console.error("Failed to confirm payment:", error);
+      alert("Error: " + (error.message || "Failed to confirm payment on server"));
+      if (error.message && error.message.toLowerCase().includes("unauthorized")) {
+        handleAdminLogout();
+      }
+    }
+  }
+
   function handleDeleteProject(projectId) {
     setProjects(prev => prev.filter(p => p.id !== projectId));
     setSelected(null);
@@ -505,9 +554,47 @@ export default function AdminPanel() {
                   </div>
                 )}
 
+                {/* Filter Tabs */}
+                {!loading && projects.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
+                    {[
+                      { id: "all", label: `All (${projects.length})` },
+                      { id: "unpaid", label: `Awaiting Payment (${projects.filter(p => p.status === 'unpaid').length})` },
+                      { id: "pending", label: `Planned (${projects.filter(p => p.status === 'pending').length})` },
+                      { id: "in_progress", label: `In Progress (${projects.filter(p => p.status === 'in_progress').length})` },
+                      { id: "completed", label: `Completed (${projects.filter(p => p.status === 'completed').length})` },
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setFilterStatus(tab.id)}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 20,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          border: "1px solid",
+                          borderColor: filterStatus === tab.id ? "#16a34a" : "#d1d5db",
+                          background: filterStatus === tab.id ? "#16a34a" : "#fff",
+                          color: filterStatus === tab.id ? "#fff" : "#4b5563",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap"
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  {projects.map(p => (
-                    <ProjectCard key={p.id} project={p} onClick={setSelected} onMarkComplete={handleMarkComplete} />
+                  {(filterStatus === "all" ? projects : projects.filter(p => p.status === filterStatus)).map(p => (
+                    <ProjectCard
+                      key={p.id}
+                      project={p}
+                      onClick={setSelected}
+                      onMarkComplete={handleMarkComplete}
+                      onConfirmPayment={handleConfirmPayment}
+                    />
                   ))}
                 </div>
               </>
@@ -518,6 +605,7 @@ export default function AdminPanel() {
                 onAddUpdate={handleAddUpdate}
                 onStatusChange={handleStatusChange}
                 onDelete={handleDeleteProject}
+                onConfirmPayment={handleConfirmPayment}
                 onUnauthorized={handleAdminLogout}
               />
             )}

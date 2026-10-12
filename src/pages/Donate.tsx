@@ -96,12 +96,13 @@ export default function Donate() {
     try {
       // Create project in backend (creates unpaid project)
       const createdProject = await ApiService.createProject(projectData);
-      setPaymentUrl(sumupUrl);
+      const targetPaymentUrl = createdProject.paymentUrl || sumupUrl;
+      setPaymentUrl(targetPaymentUrl);
       setSuccessData(createdProject);
       setStep("success");
 
       if (paymentWindow && !paymentWindow.closed) {
-        paymentWindow.location.href = sumupUrl;
+        paymentWindow.location.href = targetPaymentUrl;
       }
       // If the popup was blocked, the success screen shows a "Complete Payment" button
     } catch (err) {

@@ -747,7 +747,7 @@ app.get('/api/projects', async (req, res) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
 
-    const rows = await db.prepare('SELECT * FROM projects WHERE status != ?').all('unpaid');
+    const rows = await db.prepare('SELECT * FROM projects ORDER BY createdAt DESC').all();
     const projects = await Promise.all(rows.map(async p => {
       const proj = { ...p, customInfo: p.customInfo ? (typeof p.customInfo === 'string' ? JSON.parse(p.customInfo) : p.customInfo) : {} };
       const updates = await db.prepare('SELECT * FROM updates WHERE projectId = ? ORDER BY id').all(p.id);
@@ -879,6 +879,31 @@ app.patch('/api/projects/:id/status', async (req, res) => {
   } catch (err) {
     console.error('Error updating project status:', err);
     res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+app.post('/api/projects/:id/activate', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token || !verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' });
+
+    const proj = await db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!proj) return res.status(404).json({ error: 'Project not found' });
+
+    if (proj.status !== 'unpaid') {
+      return res.status(400).json({ error: `Project is already in status: ${proj.status}` });
+    }
+
+    const activated = await activateProject(req.params.id);
+    if (!activated) {
+      return res.status(500).json({ error: 'Failed to activate project' });
+    }
+
+    const updated = await getProjectWithUpdates(req.params.id);
+    res.json({ message: 'Project activated and confirmation emails sent', project: updated });
+  } catch (err) {
+    console.error('Error activating project:', err);
+    res.status(500).json({ error: 'Failed to activate project' });
   }
 });
 
