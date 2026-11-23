@@ -5,7 +5,7 @@ import Home from "./pages/Home";
 import WhatWeDo from "./pages/WhatWeDo";
 import OurStory from "./pages/OurStory";
 import OurTeam from "./pages/OurTeam";
-
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 import Transparency from "./pages/Transparency";
 import Donate from "./pages/Donate";
 import DonorProjectTracker from "./pages/DonorProjectTracker";
@@ -26,6 +26,7 @@ export default function App() {
           <Route path="/donor-project-tracker" element={<DonorProjectTracker />} />
           <Route path="/admin" element={<AdminPanel />} />
           <Route path="/donate" element={<Donate />} />
+          <Route path="/PrivacyPolicy" element={<PrivacyPolicy />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

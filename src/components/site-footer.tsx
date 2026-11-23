@@ -7,7 +7,7 @@ export function SiteFooter() {
   return (
     <footer className="mt-24 border-t border-border bg-btn-call text-primary-foreground">
       <div className="mx-auto grid max-w-7xl gap-12 px-6 py-16 md:grid-cols-4">
-        <div className="md:col-span-2">
+        <div className="md:col-span-2"> 
           <div className="flex items-center gap-3">
             <img src={logo} alt="Ayoub Welfare CIC Logo" className="h-30 w-auto" />
           </div>
@@ -47,6 +47,7 @@ export function SiteFooter() {
             <li><Link to="/our-team" className="hover:text-accent">Our Team</Link></li>
             <li><Link to="/impact" className="hover:text-accent">Our Impact</Link></li>
             <li><Link to="/transparency" className="hover:text-accent">Transparency</Link></li>
+                        <li><Link to="/PrivacyPolicy" className="hover:text-accent">Privacy Policy</Link></li>
           </ul>
         </div>
         <div>
