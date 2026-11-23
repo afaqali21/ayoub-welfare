@@ -152,7 +152,7 @@ export default function Donate() {
 
 </p>
                     <p className="mt-4 text-center text-sm">
-                <a href="/privacy-policy" className="underline text-primary hover:text-primary/80">view our 100% donation policy</a>
+                <a href="/PrivacyPolicy" className="underline text-primary hover:text-primary/80">view our 100% donation policy</a>
               </p>
                 </div>
               )}
@@ -182,7 +182,7 @@ export default function Donate() {
 
 </p>
                    <p className="mt-4 text-center text-sm">
-                <a href="/privacy-policy" className="underline text-primary hover:text-primary/80">view our 100% donation policy</a>
+                <a href="/PrivacyPolicy" className="underline text-primary hover:text-primary/80">view our 100% donation policy</a>
               </p>
                 </div>
               )}
@@ -262,7 +262,7 @@ export default function Donate() {
                             <p className="mt-6 text-center text-xs text-muted-foreground">Your donation is an Amanah — a sacred trust. 100% of donations go directly to programmes.</p>
 
               <p className="mt-4 text-center text-sm">
-                <a href="/privacy-policy" className="underline text-primary hover:text-primary/80">view our 100% donation policy</a>
+                <a href="/PrivacyPolicy" className="underline text-primary hover:text-primary/80">view our 100% donation policy</a>
               </p>
             </>
           )}
