@@ -18,12 +18,12 @@ export default function PrivacyPolicy() {
         <div className="rounded-2xl bg-card p-8 shadow-sm ring-1 ring-border md:p-12">
           <h2 className="font-display text-2xl font-semibold mb-4">Key Principles</h2>
           <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
-            <li><strong>Zero Salaries or Admin Deductions:</strong> Our directors and team operate on a strictly voluntary basis and take £0 in salaries or personal expenses from public appeals. All UK administrative, website, transfer, and statutory filing costs are funded separately by our directors and dedicated operational sponsors.</li>
+            <li><strong>Zero Salaries or Admin Deductions:</strong> Our directors and team operate on a strictly voluntary basis and take £0 in salaries or personal expenses from public appeals. All UK administrative, website, and statutory filing costs are funded separately by our directors and dedicated operational sponsors.</li>
             <li><strong>Project Surpluses & Re‑allocation:</strong>  When you donate toward a specific campaign (such as a water pump, winter pack, or livelihood cart), your contribution goes directly to that cause. If a project costs less than estimated or an appeal becomes overfunded, any remaining balance is automatically allocated to our general welfare fund to support urgent humanitarian or livelihood projects where the need is greatest.</li>
             <li><strong>Full Transparency:</strong> Every project is documented with local receipts, GPS locations, and photo/video verification so you can see the direct impact of your support.</li>
           </ul>
           <p className="mt-6 text-sm text-muted-foreground">
-            All UK administrative, website, transfer, and statutory filing costs are funded separately by our directors and dedicated operational sponsors.
+            All UK administrative, website, and statutory filing costs are funded separately by our directors and dedicated operational sponsors.
           </p>
         </div>
       </section>
